@@ -8,11 +8,10 @@
 #include <vector>
 #include <stdio.h>
 #include <stdint.h>
-#include <Windows.h> 
+#include <Windows.h>
 #include <thread>
 #include <atomic>
-
-
+#include <Psapi.h>
 
 #define ORIGINAL_MAX_NODES 4096
 #define NEW_MAX_NODES 8192
@@ -22,7 +21,6 @@ class MiseryNodeAI : public IServerPluginCallbacks
 public:
     MiseryNodeAI();
     ~MiseryNodeAI();
-
 
     bool Load(CreateInterfaceFn interfaceFactory, CreateInterfaceFn gameServerFactory);
     void Unload();
@@ -45,7 +43,6 @@ public:
     void OnEdictAllocated(edict_t* edict) {}
     void OnEdictFreed(const edict_t* edict) {}
 
-
     bool FindMaxNodeSignature();
     bool PatchMaxNodes();
     bool IncreaseMaxNodes(uint32_t newMaxNodes);
@@ -59,10 +56,13 @@ private:
     long m_LastAinFileSize = 0;
 
     uintptr_t m_MaxNodesAddress;
-    std::vector<uintptr_t> m_MaxNodesCompareAddresses; 
-    uintptr_t m_MemoryAllocationAddress = 0;          
+    std::vector<uintptr_t> m_MaxNodesCompareAddresses;
+    uintptr_t m_MemoryAllocationAddress = 0;
+
+    
+    uintptr_t FindPattern(uintptr_t base, size_t size, const char* pattern, const char* mask);
 };
 
 extern MiseryNodeAI g_WMiseryNodeAI;
 
-#endif 
+#endif
