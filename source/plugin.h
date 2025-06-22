@@ -8,10 +8,19 @@
 #include <vector>
 #include <stdio.h>
 #include <stdint.h>
+#ifdef _WIN32
 #include <Windows.h>
 #include <thread>
 #include <atomic>
 #include <Psapi.h>
+#else
+#include <dlfcn.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <cstring>
+#include <cstdio>
+#endif
 
 #define ORIGINAL_MAX_NODES 4096
 #define NEW_MAX_NODES 8192
@@ -59,7 +68,6 @@ private:
     std::vector<uintptr_t> m_MaxNodesCompareAddresses;
     uintptr_t m_MemoryAllocationAddress = 0;
 
-    
     uintptr_t FindPattern(uintptr_t base, size_t size, const char* pattern, const char* mask);
 };
 
