@@ -1,11 +1,8 @@
 #include "plugin.h"
 
-
-
 MiseryNodeAI g_WMiseryNodeAI;
 
 EXPOSE_SINGLE_INTERFACE_GLOBALVAR(MiseryNodeAI, IServerPluginCallbacks, INTERFACEVERSION_ISERVERPLUGINCALLBACKS, g_WMiseryNodeAI);
-
 
 void PrintPatternHex(const char* pattern, const char* mask) {
     size_t len = strlen(mask);
@@ -38,6 +35,30 @@ uintptr_t GetModuleBase(const char* modName, size_t* moduleSize) {
     if (!GetModuleInformation(GetCurrentProcess(), hModule, &modInfo, sizeof(MODULEINFO))) return 0;
     if (moduleSize) *moduleSize = (size_t)modInfo.SizeOfImage;
     return (uintptr_t)modInfo.lpBaseOfDll;
+}
+#else
+uintptr_t GetModuleBase(const char* modName, size_t* moduleSize) {
+    FILE* maps = fopen("/proc/self/maps", "r");
+    if (!maps) return 0;
+    char line[512];
+    uintptr_t base = 0;
+    size_t size = 0;
+    while (fgets(line, sizeof(line), maps)) {
+        if (strstr(line, modName)) {
+            char* saveptr;
+            char* tok = strtok_r(line, "-", &saveptr);
+            if (!tok) continue;
+            base = strtoull(tok, nullptr, 16);
+            tok = strtok_r(nullptr, " ", &saveptr);
+            if (!tok) continue;
+            uintptr_t end = strtoull(tok, nullptr, 16);
+            size = end - base;
+            break;
+        }
+    }
+    fclose(maps);
+    if (moduleSize) *moduleSize = size;
+    return base;
 }
 #endif
 
@@ -84,15 +105,19 @@ bool MiseryNodeAI::FindMaxNodeSignature()
     size_t moduleSize = 0;
 #ifdef _WIN32
     uintptr_t baseAddress = GetModuleBase("server.dll", &moduleSize);
+#else
+    uintptr_t baseAddress = GetModuleBase("server.so", &moduleSize);
 #endif
     if (!baseAddress || !moduleSize) {
-        printf("[MiseryNodeAI] server.dll not found\n");
+        printf("[MiseryNodeAI] server module not found\n");
         return false;
     }
 
     printf("[MiseryNodeAI] base %s address: %p, size: %zu\n",
 #ifdef _WIN32
         "server.dll",
+#else
+        "server.so",
 #endif
         (void*)baseAddress, moduleSize);
 
@@ -106,12 +131,15 @@ bool MiseryNodeAI::FindMaxNodeSignature()
 
 #ifdef _WIN32
     patterns = {
-        // cmp dword ptr [rbx+8], 0x1000
         {"\x81\x7B\x08\x00\x10\x00\x00\x7C\x10\x48\x8D\x0D\xAE\xB4\x67\x00", "xxxxxxxxxxxxxxxx", 3},
-        // cmp eax, 0x1000 
         {"\x3D\x00\x10\x00\x00\x0F\x87\x39\x09\x00\x00\x48\x8B\x0D\x0A\xAE", "xxxxxxxxxxxxxxx", 1},
-        // mov ecx, 0x8000
         {"\xB9\x00\x80\x00\x00\xE8\x9A\x5A\x12\x00\x48\x89\x43\x10\x81\x7B", "xxxxxxxxxxxxxxxx", 1}
+    };
+#else
+    patterns = {
+        {"\x81\xFA\x00\x10\x00\x00\x0F\x86\xA9\x00\x00\x00\x48\x8D\x3D\x14", "xxxxxxxxxxxxxxxx", 2},
+        {"\xBF\x00\x80\x00\x00\xF3\x0F\x11\x45\xDC\xE8\xB2\x33\xF5\xFF\xF3", "xxxxxxxxxxxxxxxx", 1},
+        {"\x81\x7B\x08\xFF\x0F\x00\x00\x7F\x51\xBF\x78\x00\x00\x00\xF3\x0F", "xxxxxxxxxxxxxxxx", 3}
     };
 #endif
 
@@ -148,6 +176,9 @@ bool MiseryNodeAI::IncreaseMaxNodes(uint32_t newMaxNodes)
 #ifdef _WIN32
     const uint32_t OLD_MAX_NODES = 0x1000;
     const uint32_t OLD_ALLOCATION = 0x8000;
+#else
+    const uint32_t OLD_MAX_NODES = 0xFFF;
+    const uint32_t OLD_ALLOCATION = 0x8000;
 #endif
     const uint32_t NEW_MAX_NODES_VALUE = newMaxNodes;
     const uint32_t NEW_ALLOCATION = 0x10000;
@@ -175,6 +206,19 @@ bool MiseryNodeAI::IncreaseMaxNodes(uint32_t newMaxNodes)
             }
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
+#else
+        uint32_t* valuePtr = (uint32_t*)address;
+        size_t pagesize = sysconf(_SC_PAGE_SIZE);
+        void* page = (void*)((uintptr_t)valuePtr & ~(pagesize - 1));
+        if (*valuePtr == OLD_MAX_NODES) {
+            if (mprotect(page, pagesize, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+                *valuePtr = NEW_MAX_NODES_VALUE;
+                printf("[MiseryNodeAI] Patched MAX_NODES value at %p: 0x%X -> 0x%X\n", (void*)address, OLD_MAX_NODES, NEW_MAX_NODES_VALUE);
+                patchCount++;
+                success = true;
+                mprotect(page, pagesize, PROT_READ | PROT_EXEC);
+            }
+        }
 #endif
     }
 
@@ -197,6 +241,19 @@ bool MiseryNodeAI::IncreaseMaxNodes(uint32_t newMaxNodes)
         }
     }
     __except (EXCEPTION_EXECUTE_HANDLER) {}
+#else
+    uint32_t* valuePtr = (uint32_t*)allocAddress;
+    size_t pagesize = sysconf(_SC_PAGE_SIZE);
+    void* page = (void*)((uintptr_t)valuePtr & ~(pagesize - 1));
+    if (*valuePtr == OLD_ALLOCATION) {
+        if (mprotect(page, pagesize, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+            *valuePtr = NEW_ALLOCATION;
+            printf("[MiseryNodeAI] Patched allocation value at %p: 0x%X -> 0x%X\n", (void*)allocAddress, OLD_ALLOCATION, NEW_ALLOCATION);
+            patchCount++;
+            success = true;
+            mprotect(page, pagesize, PROT_READ | PROT_EXEC);
+        }
+    }
 #endif
 
     printf("[MiseryNodeAI] Patched module. %d value(s) edited.\n", patchCount);
