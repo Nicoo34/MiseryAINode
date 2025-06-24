@@ -14,7 +14,7 @@ My first plugin, not the easy choice, not the most beautiful but dealing with me
 - Put the misery_node_win64.dll inside gmodds/bin/win64.
 
 ## Linux
-Put the misery_node_linux64.so inside gmodds/bin/linux64.
+- Put the misery_node_linux64.so inside gmodds/bin/linux64.
 
 
 - then go into your cfg and open autoexec.cfg and type this.
